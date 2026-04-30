@@ -1,87 +1,68 @@
-// src/app/page.tsx
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
+import Calendar from 'react-calendar'
+import 'react-calendar/dist/Calendar.css'
+import Link from 'next/link'
 
-export default function RepairForm() {
-  const [loading, setLoading] = useState(false)
+export default function CalendarPage() {
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const supabase = createClient()
+  const router = useRouter()
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setLoading(true)
-
-    const formData = new FormData(e.currentTarget)
-    const data = {
-      customer_name: formData.get('customer_name'),
-      location: formData.get('location'),
-      machine_type: formData.get('machine_type'),
-      issue_description: formData.get('issue_description'),
-      appointment_date: formData.get('appointment_date'),
+  useEffect(() => {
+    async function checkUser() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login') // ログインしてなければ飛ばす
+        return
+      }
+      setUserEmail(user.email ?? 'ログイン中')
+      setLoading(false)
     }
+    checkUser()
+  }, [router, supabase])
 
-    const { error } = await supabase.from('repair_requests').insert([data])
-
-    if (error) {
-      alert('エラーが発生しました: ' + error.message)
-    } else {
-      alert('予約を受け付けました！')
-      const form = e.target as HTMLFormElement
-      form.reset()
-    }
-    setLoading(false)
+  const handleDateClick = (value: any) => {
+    const date = new Date(value)
+    const dateStr = date.toISOString().split('T')[0] // YYYY-MM-DD形式
+    router.push(`/form?date=${dateStr}`) // フォームへ移動
   }
 
-  // 共通の入力スタイル（文字色を黒に指定）
-  const inputStyle = "mt-1 block w-full border border-gray-400 rounded-md p-2 text-black bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+  if (loading) return <div className="p-10 text-black font-bold text-center">読み込み中...</div>
 
   return (
-    <div className="min-h-screen bg-gray-100 py-10 px-4">
-      <div className="max-w-md mx-auto bg-white p-8 rounded-xl shadow-lg">
-        <h1 className="text-2xl font-bold mb-6 text-gray-900 border-b pb-2">出張修理 予約依頼</h1>
-        
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div>
-            <label className="block text-sm font-bold text-gray-900">依頼者名 / 顧客名</label>
-            <input name="customer_name" required className={inputStyle} />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-gray-900">現場住所</label>
-            <input name="location" required className={inputStyle} />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-gray-900">機械の種類</label>
-            <input name="machine_type" placeholder="例: ユンボ、発電機" required className={inputStyle} />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-gray-900">故障状況</label>
-            <textarea name="issue_description" rows={3} required className={inputStyle} />
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-gray-900">訪問希望日</label>
-            <input type="date" name="appointment_date" required className={inputStyle} />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-700 text-white font-bold py-3 px-4 rounded-md hover:bg-blue-800 disabled:bg-gray-400 transition-colors shadow-sm"
-          >
-            {loading ? '送信中...' : '予約を送信する'}
-          </button>
-        </form>
-        
-        <div className="mt-6 text-center">
-          <a href="/admin" className="text-blue-600 hover:underline text-sm font-medium">
-            → 予約一覧を確認する（管理者用）
-          </a>
+    <div className="min-h-screen bg-gray-50 text-black">
+      <header className="bg-white border-b px-4 py-3 shadow-sm flex justify-between items-center">
+        <h2 className="text-xl font-bold text-gray-900">修理スケジュール</h2>
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-bold text-gray-700">👤 {userEmail}</span>
+          <button onClick={async () => { await supabase.auth.signOut(); router.push('/login'); }} 
+                  className="bg-red-600 text-white text-xs font-bold py-2 px-3 rounded">ログアウト</button>
         </div>
-      </div>
+      </header>
+
+      <main className="p-4 flex flex-col items-center">
+        <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-200 w-full max-w-2xl mt-6">
+          <style>{`
+            .react-calendar { width: 100%; border: none; }
+            .react-calendar__tile--now { background: #e0f2fe; color: #0369a1; font-weight: bold; }
+            .react-calendar__tile--active { background: #1d4ed8 !important; color: white !important; }
+            .react-calendar__month-view__days__day { color: black; font-weight: 600; height: 80px; border: 0.5px solid #f3f4f6; }
+          `}</style>
+          <Calendar onClickDay={handleDateClick} locale="ja-JP" calendarType="gregory" />
+        </div>
+
+        {/* 下部に一覧へのリンク */}
+        <div className="mt-10 mb-10 w-full max-w-2xl flex justify-center">
+          <Link href="/admin/list" className="bg-gray-800 text-white font-bold py-3 px-8 rounded-lg hover:bg-black transition-all shadow-md">
+            📊 予約一覧（データ確認・管理）を表示
+          </Link>
+        </div>
+      </main>
     </div>
   )
 }
