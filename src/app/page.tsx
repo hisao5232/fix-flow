@@ -10,14 +10,26 @@ import Link from 'next/link'
 export default function CalendarPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [existingReservations, setExistingReservations] = useState<any[]>([]) // その日の予約
   const supabase = createClient()
   const router = useRouter()
+
+  const workers = ['作業員A', '作業員B', '作業員C', '作業員D']
+  const timeSlots = []
+  for (let h = 7; h <= 18; h++) {
+    for (let m of ['00', '30']) {
+      if (h === 7 && m === '00') continue
+      if (h === 18 && m === '30') break
+      timeSlots.push(`${String(h).padStart(2, '0')}:${m}`)
+    }
+  }
 
   useEffect(() => {
     async function checkUser() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
-        router.push('/login') // ログインしてなければ飛ばす
+        router.push('/login')
         return
       }
       setUserEmail(user.email ?? 'ログイン中')
@@ -26,16 +38,53 @@ export default function CalendarPage() {
     checkUser()
   }, [router, supabase])
 
-  const handleDateClick = (value: any) => {
+  // 日付クリック時に予約データを取得
+  const handleDateClick = async (value: any) => {
     const date = new Date(value)
-    const dateStr = date.toISOString().split('T')[0] // YYYY-MM-DD形式
-    router.push(`/form?date=${dateStr}`) // フォームへ移動
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    const dateStr = `${y}-${m}-${d}`
+    
+    setSelectedDate(dateStr)
+
+    // Supabaseからその日の予約をすべて取得
+    const { data, error } = await supabase
+      .from('repair_requests')
+      .select('worker_name, start_time')
+      .eq('appointment_date', dateStr)
+
+    if (!error && data) {
+      setExistingReservations(data)
+    }
+  }
+
+  // 特定の枠が予約済み（または3時間の作業中）か判定する関数
+  const isReserved = (worker: string, currentTime: string) => {
+    return existingReservations.some(res => {
+      if (res.worker_name !== worker) return false
+      
+      // 開始時間と現在の枠の時間を数値（分）に変換して比較
+      const [startH, startM] = res.start_time.split(':').map(Number)
+      const [currH, currM] = currentTime.split(':').map(Number)
+      
+      const startInMinutes = startH * 60 + startM
+      const currInMinutes = currH * 60 + currM
+      
+      // 開始時間から180分（3時間）以内であれば予約済みとする
+      return currInMinutes >= startInMinutes && currInMinutes < startInMinutes + 180
+    })
+  }
+
+  const handleTimeSlotClick = (worker: string, time: string) => {
+    if (isReserved(worker, time)) return // 予約済みなら何もしない
+    router.push(`/form?date=${selectedDate}&time=${time}&worker=${worker}`)
   }
 
   if (loading) return <div className="p-10 text-black font-bold text-center">読み込み中...</div>
 
   return (
-    <div className="min-h-screen bg-gray-50 text-black">
+    <div className="min-h-screen bg-gray-50 text-black text-sm">
       <header className="bg-white border-b px-4 py-3 shadow-sm flex justify-between items-center">
         <h2 className="text-xl font-bold text-gray-900">修理スケジュール</h2>
         <div className="flex items-center gap-4">
@@ -56,10 +105,55 @@ export default function CalendarPage() {
           <Calendar onClickDay={handleDateClick} locale="ja-JP" calendarType="gregory" />
         </div>
 
-        {/* 下部に一覧へのリンク */}
+        {selectedDate && (
+          <div className="mt-8 w-full max-w-5xl bg-white p-6 rounded-xl shadow-2xl border border-gray-200">
+            <h2 className="text-xl font-bold mb-4 text-center text-blue-900 border-b pb-2">
+              📅 {selectedDate.replace(/-/g, '/')} の空き状況
+            </h2>
+            
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse table-fixed">
+                <thead>
+                  <tr className="bg-gray-800 text-white">
+                    <th className="border border-gray-300 p-2 w-16">時間</th>
+                    {workers.map(w => (
+                      <th key={w} className="border border-gray-300 p-2">{w}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {timeSlots.map(time => (
+                    <tr key={time}>
+                      <td className="border border-gray-300 p-1 text-center text-xs font-bold bg-gray-100">
+                        {time}
+                      </td>
+                      {workers.map(worker => {
+                        const reserved = isReserved(worker, time)
+                        return (
+                          <td 
+                            key={`${worker}-${time}`}
+                            onClick={() => handleTimeSlotClick(worker, time)}
+                            className={`border border-gray-300 p-2 text-center text-xs transition-colors ${
+                              reserved 
+                                ? 'bg-red-100 text-red-500 cursor-not-allowed font-bold' 
+                                : 'cursor-pointer hover:bg-blue-100 text-blue-600'
+                            }`}
+                          >
+                            {reserved ? '■ 予約済' : '＋ 予約'}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <div className="mt-10 mb-10 w-full max-w-2xl flex justify-center">
           <Link href="/admin/list" className="bg-gray-800 text-white font-bold py-3 px-8 rounded-lg hover:bg-black transition-all shadow-md">
-            📊 予約一覧（データ確認・管理）を表示
+            📊 予約一覧を表示
           </Link>
         </div>
       </main>
